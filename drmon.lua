@@ -6,6 +6,7 @@ local targetStrength = 50
 local maxTemperature = 8000
 local safeTemperature = 3000
 local lowestFieldPercent = 15
+local targetTemp = 7000
 
 local activateOnCharged = 1
 
@@ -14,7 +15,7 @@ os.loadAPI("lib/f")
 
 local version = "0.25"
 -- toggleable via the monitor, use our algorithm to achieve our target field strength or let the user tweak it
-local autoInputGate = 1
+local auto = 1
 local curInputGate = 222000
 
 -- monitor 
@@ -62,7 +63,7 @@ mon.monitor,mon.X, mon.Y = monitor, monX, monY
 function save_config()
   sw = fs.open("config.txt", "w")   
   sw.writeLine(version)
-  sw.writeLine(autoInputGate)
+  sw.writeLine(auto)
   sw.writeLine(curInputGate)
   sw.close()
 end
@@ -71,7 +72,7 @@ end
 function load_config()
   sr = fs.open("config.txt", "r")
   version = sr.readLine()
-  autoInputGate = tonumber(sr.readLine())
+  auto = tonumber(sr.readLine())
   curInputGate = tonumber(sr.readLine())
   sr.close()
 end
@@ -93,7 +94,7 @@ function buttons()
     -- output gate controls
     -- 2-4 = -1000, 6-9 = -10000, 10-12,8 = -100000
     -- 17-19 = +1000, 21-23 = +10000, 25-27 = +100000
-    if yPos == 8 then
+    if yPos == 8 and auto == 0 then
       local cFlow = fluxgate.getSignalLowFlow()
       if xPos >= 2 and xPos <= 4 then
         cFlow = cFlow-1000
@@ -114,7 +115,7 @@ function buttons()
     -- input gate controls
     -- 2-4 = -1000, 6-9 = -10000, 10-12,8 = -100000
     -- 17-19 = +1000, 21-23 = +10000, 25-27 = +100000
-    if yPos == 10 and autoInputGate == 0 and xPos ~= 14 and xPos ~= 15 then
+    if yPos == 10 and auto == 0 and xPos ~= 14 and xPos ~= 15 then
       if xPos >= 2 and xPos <= 4 then
         curInputGate = curInputGate-1000
       elseif xPos >= 6 and xPos <= 9 then
@@ -134,10 +135,10 @@ function buttons()
 
     -- input gate toggle
     if yPos == 10 and ( xPos == 14 or xPos == 15) then
-      if autoInputGate == 1 then
-        autoInputGate = 0
+      if auto == 1 then
+        auto = 0
       else
-        autoInputGate = 1
+        auto = 1
       end
       save_config()
     end
@@ -205,15 +206,15 @@ function update()
     f.draw_text_lr(mon, 2, 7, 1, "Output Gate", f.format_int(fluxgate.getSignalLowFlow()) .. " rf/t", colors.white, colors.blue, colors.black)
 
     -- buttons
-    drawButtons(8)
 
     f.draw_text_lr(mon, 2, 9, 1, "Input Gate", f.format_int(inputfluxgate.getSignalLowFlow()) .. " rf/t", colors.white, colors.blue, colors.black)
 
-    if autoInputGate == 1 then
+    if auto == 1 then
       f.draw_text(mon, 14, 10, "AU", colors.white, colors.gray)
     else
       f.draw_text(mon, 14, 10, "MA", colors.white, colors.gray)
       drawButtons(10)
+	  drawButtons(8)
     end
 
     local satPercent
@@ -229,7 +230,7 @@ function update()
     if fieldPercent >= 50 then fieldColor = colors.green end
     if fieldPercent < 50 and fieldPercent > 30 then fieldColor = colors.orange end
 
-    if autoInputGate == 1 then 
+    if auto == 1 then 
       f.draw_text_lr(mon, 2, 14, 1, "Field Strength T:" .. targetStrength, fieldPercent .. "%", colors.white, fieldColor, colors.black)
     else
       f.draw_text_lr(mon, 2, 14, 1, "Field Strength", fieldPercent .. "%", colors.white, fieldColor, colors.black)
@@ -273,13 +274,19 @@ function update()
       reactor.activateReactor()
     end
 
-    -- are we on? regulate the input fludgate to our target field strength
-    -- or set it to our saved setting since we are on manual
+    -- are we on?
     if ri.status == "online" then
-      if autoInputGate == 1 then 
+	--regulate the input fluxgate to our target field strength
+    -- or set it to our saved setting since we are on manual
+      if auto == 1 then 
         fluxval = ri.fieldDrainRate / (1 - (targetStrength/100) )
         print("Target Gate: ".. fluxval)
         inputfluxgate.setSignalLowFlow(fluxval)
+	--regulate the output to match a certain target temperature
+		local limit = fluxgate.getSignalLowFlow()
+		local generation = ri.generationRate
+		limit = generation + (targetTemp-ri.temperature)*50
+		fluxgate.setSignalLowFlow(limit)
       else
         inputfluxgate.setSignalLowFlow(curInputGate)
       end
